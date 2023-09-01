@@ -5,4 +5,15 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+name = "ogma_db"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ogma_cli"
+path = "src/bin.rs"
+
+
 [dependencies]
+rustyline = "12.0.0"
+sqlparser = "0.37.0"
