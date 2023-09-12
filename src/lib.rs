@@ -1,3 +1,4 @@
+pub mod common;
 pub mod parser;
 pub mod storage_engine;
 pub mod table;
