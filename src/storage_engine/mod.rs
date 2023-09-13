@@ -2,6 +2,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::{collections::HashMap, io::Write};
 
@@ -9,20 +10,9 @@ use std::{collections::HashMap, io::Write};
 
 // First party library imports
 
+use serde_json::from_str;
+
 use crate::common::{ColumnType, DBSchema, TableInfo};
-
-fn table_path(base_path: &Path, db_name: &OsStr, extension: &OsStr, table_name: &str) -> PathBuf {
-    let mut path = PathBuf::from(base_path);
-    let mut table_filename = OsString::new();
-    table_filename.push(db_name);
-    table_filename.push("_");
-    table_filename.push(table_name);
-    table_filename.push(".");
-    table_filename.push(extension);
-
-    path.push(table_filename);
-    path
-}
 
 pub enum Error {
     IOError(std::io::Error),
@@ -42,58 +32,107 @@ impl From<serde_json::Error> for Error {
     }
 }
 
+struct PathInfo<'a> {
+    full_path: &'a Path,
+    base_path: &'a Path,
+    db_name: &'a OsStr,
+    extension: &'a OsStr,
+}
+
+impl<'a> PathInfo<'a> {
+    fn from_path(full_path: &'a Path) -> Option<Self> {
+        if let (Some(base_path), Some(db_name), Some(extension)) = (
+            full_path.parent(),
+            full_path.file_stem(),
+            full_path.extension(),
+        ) {
+            Some(Self {
+                full_path,
+                base_path,
+                db_name,
+                extension,
+            })
+        } else {
+            None
+        }
+    }
+
+    fn generate_table_path(&self, table_name: &String) -> PathBuf {
+        let mut path = PathBuf::from(self.base_path);
+        let mut table_filename = OsString::new();
+        table_filename.push(self.db_name);
+        table_filename.push("_");
+        table_filename.push(table_name);
+        table_filename.push(".");
+        table_filename.push(self.extension);
+
+        path.push(table_filename);
+        path
+    }
+}
+
 pub struct DataBase {
+    schema_file: File,
     schema: DBSchema,
     tables: HashMap<String, File>,
 }
 
 impl DataBase {
-    pub fn create(path: PathBuf, schema: DBSchema) -> Result<Self, Error> {
-        if let (Some(base_path), Some(db_name), Some(extension)) =
-            (path.parent(), path.file_stem(), path.extension())
-        {
+    pub fn create(path: &Path, schema: DBSchema) -> Result<Self, Error> {
+        if let Some(path_info) = PathInfo::from_path(&path) {
             let mut schema_file = File::create(&path)?;
             schema_file.write_all(&serde_json::to_vec(&schema)?)?;
 
             let mut tables = HashMap::new();
 
             for table_name in schema.keys() {
-                let table_path = table_path(base_path, db_name, extension, table_name);
+                let table_path = path_info.generate_table_path(table_name);
                 let table_file = File::create(table_path)?;
                 tables.insert(table_name.to_owned(), table_file);
             }
 
-            Ok(DataBase { schema, tables })
+            Ok(DataBase {
+                schema_file,
+                schema,
+                tables,
+            })
         } else {
             Err(Error::PathError(format!(
-                "Failed to parse DB Name from {}",
+                "Failed to parse PathInfo from {}",
                 &path.display()
             )))
         }
     }
 
-    //     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, std::io::Error> {
-    //         let file = File::options()
-    //             .read(true)
-    //             .write(true)
-    //             .open(path)?;
+    pub fn open(path: &Path) -> Result<Self, Error> {
+        if let Some(path_info) = PathInfo::from_path(&path) {
+            let mut schema_file = File::options().read(true).write(true).open(path)?;
 
-    //         let mut schema_size_bytes = [0u8; USIZE_BYTES];
+            let mut raw_schema = String::new();
+            schema_file.read_to_string(&mut raw_schema)?;
 
-    //         file.read_at(&mut schema_size_bytes, 0)?;
+            let schema: DBSchema = from_str(&raw_schema)?;
 
-    //         let schema_size = usize::from_ne_bytes(schema_size_bytes);
+            let mut tables = HashMap::new();
 
-    //         let mut schema_buffer = vec![0u8; schema_size];
+            for table_name in schema.keys() {
+                let table_path = path_info.generate_table_path(table_name);
+                let table_file = File::options().read(true).write(true).open(table_path)?;
+                tables.insert(table_name.to_owned(), table_file);
+            }
 
-    //         file.read_exact_at(&mut schema_buffer, USIZE_BYTES as u64)?;
-
-    //         let tables = from_slice(&schema_buffer)?;
-
-    //         println!("{:?}", tables);
-
-    //         Ok(DataFile { handle: file, schema: Schema {tables} })
-    //     }
+            Ok(DataBase {
+                schema_file,
+                schema,
+                tables,
+            })
+        } else {
+            Err(Error::PathError(format!(
+                "Failed to parse PathInfo from {}",
+                &path.display()
+            )))
+        }
+    }
 }
 
 pub fn fool_around() {
@@ -119,13 +158,13 @@ pub fn fool_around() {
         ],
     );
 
-    match DataBase::create("./data/test.ogmadb".into(), schema) {
+    match DataBase::create(Path::new("./data/test.ogmadb"), schema) {
         Ok(_) => println!("Success Creating!"),
-        Err(_) => println!("broke"),
+        Err(_) => println!("broke creating"),
     }
 
-    // match Database::open("./test.ogmadb") {
-    //     Ok(_) => println!("Success Reading!"),
-    //     Err(err) => println!("{err}"),
-    // }
+    match DataBase::open(Path::new("./data/test.ogmadb")) {
+        Ok(_) => println!("Success Reading!"),
+        Err(_) => println!("broke reading"),
+    }
 }
