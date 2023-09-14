@@ -3,6 +3,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::Read;
+use std::os::unix::prelude::FileExt;
 use std::path::{Path, PathBuf};
 use std::{collections::HashMap, io::Write};
 
@@ -12,12 +13,14 @@ use std::{collections::HashMap, io::Write};
 
 use serde_json::from_str;
 
-use crate::common::{ColumnType, DBSchema, TableInfo};
+use crate::common::{ColumnType, DBSchema, TableInfo, Block, BLOCK_SIZE, TableInfoMap, map_table_info};
 
+#[derive(Debug)]
 pub enum Error {
     IOError(std::io::Error),
     PathError(String),
     SerdeError(serde_json::Error),
+    SchemaError(String),
 }
 
 impl From<std::io::Error> for Error {
@@ -133,10 +136,52 @@ impl DataBase {
             )))
         }
     }
+
+    pub fn store(&self, table_name: &str, data: Vec<Block>) -> Result<(), Error>{
+        match self.tables.get(table_name) {
+            Some(table) => {
+                for (index, datum) in data.iter().enumerate() {
+                    table.write_at(datum, (index * BLOCK_SIZE) as u64)?;
+                }
+                Ok(())
+            },
+            None => Err(Error::SchemaError(format!("Table {} does not exist", table_name))),
+        }
+    }
+
+    pub fn retrieve(&self, table_name: &str) -> Result<(TableInfoMap, Vec<Block>), Error> {
+        match (self.tables.get(table_name), self.schema.get(table_name)) {
+            (Some(table), Some(table_info)) => {
+                let table_map = map_table_info(table_info);
+                let mut data = Vec::new();
+
+                let mut buf = [0u8; BLOCK_SIZE];
+                let mut offset = 0u64;
+                // Behold, I learned how to Do While in Rust, and it's... interesting
+                while {
+                    // Read a block from the file
+                    let bytes_read = table.read_at(&mut buf, offset * BLOCK_SIZE as u64)?;
+                    bytes_read > 0
+                } {
+                    // push it to our Vec
+                    data.push(buf);
+                    // Set state for next iteration
+                    offset += 1;
+                    buf = [0u8; BLOCK_SIZE];
+
+                }
+                Ok((table_map, data))
+            },
+            // TODO: Maybe come up with better error for missing data file
+            (None, Some(_)) => Err(Error::SchemaError(format!("Table {} is missing its data file", table_name))),
+            (Some(_), None) => Err(Error::SchemaError(format!("Table {} has data file, but is missing in schema", table_name))),
+            (None, None) => Err(Error::SchemaError(format!("Table {} does not exist", table_name))),
+        }
+    }
 }
 
 pub fn fool_around() {
-    let mut schema = HashMap::new();
+    let mut schema: DBSchema = HashMap::new();
     schema.insert(
         "attributes".into(),
         vec![
@@ -158,13 +203,22 @@ pub fn fool_around() {
         ],
     );
 
-    match DataBase::create(Path::new("./data/test.ogmadb"), schema) {
-        Ok(_) => println!("Success Creating!"),
-        Err(_) => println!("broke creating"),
-    }
+    // match DataBase::create(Path::new("./data/test.ogmadb"), schema) {
+    //     Ok(_) => println!("Success Creating!"),
+    //     Err(_) => println!("broke creating"),
+    // }
 
     match DataBase::open(Path::new("./data/test.ogmadb")) {
-        Ok(_) => println!("Success Reading!"),
+        Ok(db) => {
+            let data = vec![[1u8; BLOCK_SIZE], [2u8; BLOCK_SIZE], [3u8; BLOCK_SIZE]];
+            db.store("currency", data).unwrap();
+
+            let (manifest, the_goods) = db.retrieve("currency").unwrap();
+            println!("Shipping manifest: {:?}", manifest);
+            for good in the_goods {
+                println!("Got a whole block of {}", good[0])
+            }
+        },
         Err(_) => println!("broke reading"),
     }
 }
