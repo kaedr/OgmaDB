@@ -1,3 +1,8 @@
+pub mod common;
+pub mod parser;
+pub mod storage_engine;
+pub mod table;
+
 pub fn add(left: usize, right: usize) -> usize {
     left + right
 }
