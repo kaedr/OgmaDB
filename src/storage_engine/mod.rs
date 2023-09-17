@@ -11,9 +11,13 @@ use std::{collections::HashMap, io::Write};
 
 // First party library imports
 
+use serde::de::Visitor;
+use serde::{Deserialize, Serialize};
 use serde_json::from_str;
 
-use crate::common::{ColumnType, DBSchema, TableInfo, Block, BLOCK_SIZE, TableInfoMap, map_table_info};
+use crate::common::{map_table_info, Block, DBSchema, TableInfoMap, BLOCK_SIZE};
+
+mod cache;
 
 #[derive(Debug)]
 pub enum Error {
@@ -21,6 +25,50 @@ pub enum Error {
     PathError(String),
     SerdeError(serde_json::Error),
     SchemaError(String),
+    // StringForm exists for client deserialization, since we can't guarantee
+    // underlying error types will give us a from_string method
+    StringForm(String),
+}
+
+impl Serialize for Error {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Error::IOError(err) => serializer.serialize_str(err.to_string().as_ref()),
+            Error::PathError(err) => serializer.serialize_str(err),
+            Error::SerdeError(err) => serializer.serialize_str(err.to_string().as_ref()),
+            Error::SchemaError(err) => serializer.serialize_str(err),
+            Error::StringForm(err) => serializer.serialize_str(err),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Error {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_string(StringFormVisitor)
+    }
+}
+
+struct StringFormVisitor;
+
+impl<'de> Visitor<'de> for StringFormVisitor {
+    type Value = Error;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a storage_engine::Error in String form")
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(Error::StringForm(v))
+    }
 }
 
 impl From<std::io::Error> for Error {
@@ -36,7 +84,6 @@ impl From<serde_json::Error> for Error {
 }
 
 struct PathInfo<'a> {
-    full_path: &'a Path,
     base_path: &'a Path,
     db_name: &'a OsStr,
     extension: &'a OsStr,
@@ -50,7 +97,6 @@ impl<'a> PathInfo<'a> {
             full_path.extension(),
         ) {
             Some(Self {
-                full_path,
                 base_path,
                 db_name,
                 extension,
@@ -137,19 +183,40 @@ impl DataBase {
         }
     }
 
-    pub fn store(&self, table_name: &str, data: Vec<Block>) -> Result<(), Error>{
+    pub fn store(&self, table_name: &str, data: Vec<Block>) -> Result<(), Error> {
         match self.tables.get(table_name) {
             Some(table) => {
                 for (index, datum) in data.iter().enumerate() {
                     table.write_at(datum, (index * BLOCK_SIZE) as u64)?;
                 }
                 Ok(())
-            },
-            None => Err(Error::SchemaError(format!("Table {} does not exist", table_name))),
+            }
+            None => Err(Error::SchemaError(format!(
+                "Table {} does not exist",
+                table_name
+            ))),
         }
     }
 
-    pub fn retrieve(&self, table_name: &str) -> Result<(TableInfoMap, Vec<Block>), Error> {
+    pub fn store_block_at(
+        &self,
+        table_name: &str,
+        offset: u64,
+        block: &Block,
+    ) -> Result<(), Error> {
+        match self.tables.get(table_name) {
+            Some(table) => {
+                table.write_at(block, offset * BLOCK_SIZE as u64)?;
+                Ok(())
+            }
+            None => Err(Error::SchemaError(format!(
+                "Table {} does not exist",
+                table_name
+            ))),
+        }
+    }
+
+    pub fn load(&self, table_name: &str) -> Result<(TableInfoMap, Vec<Block>), Error> {
         match (self.tables.get(table_name), self.schema.get(table_name)) {
             (Some(table), Some(table_info)) => {
                 let table_map = map_table_info(table_info);
@@ -168,57 +235,36 @@ impl DataBase {
                     // Set state for next iteration
                     offset += 1;
                     buf = [0u8; BLOCK_SIZE];
-
                 }
                 Ok((table_map, data))
-            },
+            }
             // TODO: Maybe come up with better error for missing data file
-            (None, Some(_)) => Err(Error::SchemaError(format!("Table {} is missing its data file", table_name))),
-            (Some(_), None) => Err(Error::SchemaError(format!("Table {} has data file, but is missing in schema", table_name))),
-            (None, None) => Err(Error::SchemaError(format!("Table {} does not exist", table_name))),
+            (None, Some(_)) => Err(Error::SchemaError(format!(
+                "Table {} is missing its data file",
+                table_name
+            ))),
+            (Some(_), None) => Err(Error::SchemaError(format!(
+                "Table {} has data file, but is missing in schema",
+                table_name
+            ))),
+            (None, None) => Err(Error::SchemaError(format!(
+                "Table {} does not exist",
+                table_name
+            ))),
         }
     }
-}
 
-pub fn fool_around() {
-    let mut schema: DBSchema = HashMap::new();
-    schema.insert(
-        "attributes".into(),
-        vec![
-            ("Strength".into(), ColumnType::Int),
-            ("Dexterity".into(), ColumnType::Int),
-            ("Constitution".into(), ColumnType::Int),
-            ("Intelligence".into(), ColumnType::Int),
-            ("Wisdom".into(), ColumnType::Int),
-            ("Charisma".into(), ColumnType::Int),
-        ],
-    );
-    schema.insert(
-        "currency".into(),
-        vec![
-            ("Platinum".into(), ColumnType::Int),
-            ("Gold".into(), ColumnType::Int),
-            ("Silver".into(), ColumnType::Int),
-            ("Copper".into(), ColumnType::Int),
-        ],
-    );
-
-    // match DataBase::create(Path::new("./data/test.ogmadb"), schema) {
-    //     Ok(_) => println!("Success Creating!"),
-    //     Err(_) => println!("broke creating"),
-    // }
-
-    match DataBase::open(Path::new("./data/test.ogmadb")) {
-        Ok(db) => {
-            let data = vec![[1u8; BLOCK_SIZE], [2u8; BLOCK_SIZE], [3u8; BLOCK_SIZE]];
-            db.store("currency", data).unwrap();
-
-            let (manifest, the_goods) = db.retrieve("currency").unwrap();
-            println!("Shipping manifest: {:?}", manifest);
-            for good in the_goods {
-                println!("Got a whole block of {}", good[0])
+    pub fn load_block_at(&self, table_name: &str, offset: u64) -> Result<Block, Error> {
+        match self.tables.get(table_name) {
+            Some(table) => {
+                let mut buf = [0u8; BLOCK_SIZE];
+                table.read_at(&mut buf, offset * BLOCK_SIZE as u64)?;
+                Ok(buf)
             }
-        },
-        Err(_) => println!("broke reading"),
+            None => Err(Error::SchemaError(format!(
+                "Table {} does not exist",
+                table_name
+            ))),
+        }
     }
 }

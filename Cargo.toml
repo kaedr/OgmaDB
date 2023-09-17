@@ -10,9 +10,12 @@ name = "ogma_db"
 path = "src/lib.rs"
 
 [[bin]]
-name = "ogma_cli"
-path = "src/bin.rs"
+name = "ogma_server"
+path = "src/server/cli.rs"
 
+[[bin]]
+name = "ogma_client"
+path = "src/client/cli.rs"
 
 [dependencies]
 rustyline = "12.0.0"
