@@ -1,4 +1,7 @@
-use std::{io::{Read, Write, BufReader, BufWriter, BufRead}, net::TcpStream};
+use std::{
+    io::{BufRead, BufReader, BufWriter, Write},
+    net::TcpStream,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +27,7 @@ impl BufSocket {
         Ok(buf)
     }
 
-    pub fn write_all(&mut self, buf: &[u8]) -> Result<(), Error>{
+    pub fn write_all(&mut self, buf: &[u8]) -> Result<(), Error> {
         self.writer.write_all(buf)?;
         self.writer.write_all(&[0xA])?;
         self.writer.flush()?;

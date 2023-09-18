@@ -11,7 +11,7 @@ use std::{collections::HashMap, io::Write};
 use serde_json::from_str;
 
 // First party library imports
-use crate::common::{map_table_info, Block, DBSchema, TableInfoMap, BLOCK_SIZE, error::Error};
+use crate::common::{error::Error, map_table_info, Block, DBSchema, TableInfoMap, BLOCK_SIZE};
 
 mod cache;
 
@@ -60,8 +60,8 @@ pub struct DataBase {
 
 impl DataBase {
     pub fn create(path: &Path, schema: DBSchema) -> Result<Self, Error> {
-        if let Some(path_info) = PathInfo::from_path(&path) {
-            let mut schema_file = File::create(&path)?;
+        if let Some(path_info) = PathInfo::from_path(path) {
+            let mut schema_file = File::create(path)?;
             schema_file.write_all(&serde_json::to_vec(&schema)?)?;
 
             let mut tables = HashMap::new();
@@ -86,7 +86,7 @@ impl DataBase {
     }
 
     pub fn open(path: &Path) -> Result<Self, Error> {
-        if let Some(path_info) = PathInfo::from_path(&path) {
+        if let Some(path_info) = PathInfo::from_path(path) {
             let mut schema_file = File::options().read(true).write(true).open(path)?;
 
             let mut raw_schema = String::new();

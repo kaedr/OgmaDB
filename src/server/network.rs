@@ -5,8 +5,9 @@ use std::{
 
 use ogma_db::{
     common::{
-        network::{QueriedData, RequestType, ResponseType, BufSocket},
-        AsRows, error::Error,
+        error::Error,
+        network::{BufSocket, QueriedData, RequestType, ResponseType},
+        AsRows,
     },
     storage_engine::DataBase,
 };

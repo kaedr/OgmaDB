@@ -58,6 +58,12 @@ impl<'de> Visitor<'de> for StringFormVisitor {
     {
         Ok(Error::StringForm(v))
     }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error, {
+        Ok(Error::StringForm(v.to_owned()))
+    }
 }
 
 impl From<std::io::Error> for Error {

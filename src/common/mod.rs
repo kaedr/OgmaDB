@@ -4,8 +4,8 @@ use std::collections::HashMap;
 // Third party library imports
 use serde::{Deserialize, Serialize};
 
-pub mod network;
 pub mod error;
+pub mod network;
 
 pub const BLOCK_SIZE: usize = 8192;
 pub type Block = [u8; BLOCK_SIZE];

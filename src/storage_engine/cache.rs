@@ -17,6 +17,6 @@ struct SmartBlock {
 }
 
 struct RowInfo {
-    ID: u64,
-    Offset: u64,
+    id: u64,
+    offset: u64,
 }
