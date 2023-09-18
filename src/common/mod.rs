@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 // Third party library imports
 use serde::{Deserialize, Serialize};
+//use sqlparser::ast::DataType;
 
 pub mod network;
 pub mod table;
@@ -14,14 +15,23 @@ pub const COLUMN_WIDTH: usize = 8;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ColumnType {
-    Int, // i64
+    Integer, // i64
     Boolean,
-    String, // for short strings
+    Text,   // for short strings
     Clob,   // for long strings
     Blob,   // for any size binary data
 }
 
-pub type Row = Vec<u8>;
+pub enum DataType{
+    Integer(i64),
+    Boolean(bool),
+    Text([char; 8]),
+    Clob(Box<DataType>),
+    Blob(Box<DataType>)
+}
+
+pub type Row = Vec<DataType>;
+pub type RawRow = Vec<u64>; 
 pub type ColumnHeader = (String, ColumnType);
 pub type TableInfo = Vec<ColumnHeader>;
 pub type TableInfoMap = HashMap<String, (ColumnType, u64)>;
