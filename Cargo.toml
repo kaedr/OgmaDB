@@ -5,4 +5,20 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+name = "ogma_db"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ogma_server"
+path = "src/server/cli.rs"
+
+[[bin]]
+name = "ogma_client"
+path = "src/client/cli.rs"
+
 [dependencies]
+rustyline = "12.0.0"
+sqlparser = "0.37.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
