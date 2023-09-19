@@ -1,5 +1,6 @@
 pub mod common;
 pub mod parser;
+pub mod query_engine;
 pub mod storage_engine;
 
 pub fn add(left: usize, right: usize) -> usize {

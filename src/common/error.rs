@@ -7,6 +7,7 @@ use serde;
 use serde::Serialize;
 
 use std;
+use std::fmt::Display;
 
 #[derive(Debug)]
 pub enum Error {
@@ -14,9 +15,24 @@ pub enum Error {
     PathError(String),
     SerdeError(serde_json::Error),
     SchemaError(String),
+    // An error occurred trying to report an error...
+    MetaError(Box<Error>),
     // StringForm exists for client deserialization, since we can't guarantee
     // underlying error types will give us a from_string method
     StringForm(String),
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::IOError(err) => write!(f, "{err}"),
+            Error::PathError(err) => write!(f, "{err}"),
+            Error::SerdeError(err) => write!(f, "{err}"),
+            Error::SchemaError(err) => write!(f, "{err}"),
+            Error::MetaError(err) => write!(f, "{err}"),
+            Error::StringForm(err) => write!(f, "{err}"),
+        }
+    }
 }
 
 impl Serialize for Error {
@@ -24,13 +40,7 @@ impl Serialize for Error {
     where
         S: serde::Serializer,
     {
-        match self {
-            Error::IOError(err) => serializer.serialize_str(err.to_string().as_ref()),
-            Error::PathError(err) => serializer.serialize_str(err),
-            Error::SerdeError(err) => serializer.serialize_str(err.to_string().as_ref()),
-            Error::SchemaError(err) => serializer.serialize_str(err),
-            Error::StringForm(err) => serializer.serialize_str(err),
-        }
+        serializer.serialize_str(self.to_string().as_ref())
     }
 }
 
@@ -60,8 +70,9 @@ impl<'de> Visitor<'de> for StringFormVisitor {
     }
 
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error, {
+    where
+        E: serde::de::Error,
+    {
         Ok(Error::StringForm(v.to_owned()))
     }
 }

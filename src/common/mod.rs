@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 
 // Third party library imports
+use byteorder::{ByteOrder, LE};
 use serde::{Deserialize, Serialize};
 
 pub mod error;
@@ -14,14 +15,22 @@ pub const COLUMN_WIDTH: usize = 8;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ColumnType {
-    Int, // i64
+    Integer, // i64
     Boolean,
-    String, // for short strings
-    Clob,   // for long strings
-    Blob,   // for any size binary data
+    Text, // for short strings
+    Clob, // for long strings
+    Blob, // for any size binary data
 }
 
-pub type Row = Vec<u8>;
+pub enum DataType {
+    Integer(i64),
+    Text([char; 8]),
+    ClobRef(u64),
+    BlobRef(u64),
+}
+
+pub type Row = Vec<DataType>;
+pub type RawRow = Vec<u64>;
 pub type ColumnHeader = (String, ColumnType);
 pub type TableInfo = Vec<ColumnHeader>;
 pub type TableInfoMap = HashMap<String, (ColumnType, u64)>;
@@ -41,14 +50,37 @@ pub fn map_table_info(table_info: &TableInfo) -> TableInfoMap {
 }
 
 pub trait AsRows {
-    fn as_rows(&self, columns: usize) -> Vec<Row>;
+    fn as_rows(&self, columns: usize) -> Vec<RawRow>;
 }
 
 impl AsRows for Block {
-    fn as_rows(&self, columns: usize) -> Vec<Row> {
+    fn as_rows(&self, columns: usize) -> Vec<RawRow> {
         let chunk_size = columns * COLUMN_WIDTH;
         self.chunks_exact(chunk_size)
-            .map(|row| row.to_owned())
-            .collect::<Vec<Row>>()
+            .map(|row| {
+                row.chunks_exact(COLUMN_WIDTH)
+                    .map(|bytes| LE::read_u64(bytes))
+                    .collect()
+            })
+            .collect::<Vec<RawRow>>()
+    }
+}
+
+impl AsRows for Vec<Block> {
+    fn as_rows(&self, columns: usize) -> Vec<RawRow> {
+        let chunk_size = columns * COLUMN_WIDTH;
+        self.iter()
+            .map(|block| {
+                block
+                    .chunks_exact(chunk_size)
+                    .map(|row| {
+                        row.chunks_exact(COLUMN_WIDTH)
+                            .map(|bytes| LE::read_u64(bytes))
+                            .collect::<RawRow>()
+                    })
+                    .collect::<Vec<RawRow>>()
+            })
+            .flatten()
+            .collect()
     }
 }

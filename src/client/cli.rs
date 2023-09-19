@@ -17,7 +17,19 @@ fn main() {
         println!("Request: {:?} -- was sent", example_query);
         let example_response =
             ResponseType::receive(&mut buf_sock).expect("Blew up while receiving...");
-        println!("Response: {:?} -- was received", example_response)
+        println!("Response: {:?} -- was received", example_response);
+
+        match example_response {
+            ResponseType::Error(_) => todo!(),
+            ResponseType::QueryHandle { schema, qid } => {
+                RequestType::More(qid).send(&mut buf_sock).expect("Blew up while sending...");
+                let another_response =
+                    ResponseType::receive(&mut buf_sock).expect("Blew up while receiving...");
+                println!("Response: {:?} -- was received", another_response);
+            },
+            ResponseType::Data(_) => todo!(),
+            ResponseType::Empty => todo!(),
+        }
     } else {
         println!("Couldn't connect to server...");
     }

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::error::Error;
 
-use super::{Row, TableInfoMap};
+use super::{RawRow, TableInfoMap};
 
 pub struct BufSocket {
     reader: BufReader<TcpStream>,
@@ -38,6 +38,7 @@ impl BufSocket {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum RequestType {
     Query(String),
+    More(u64),
 }
 
 impl RequestType {
@@ -56,7 +57,9 @@ impl RequestType {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ResponseType {
     Error(Error),
-    Data(QueriedData),
+    QueryHandle { schema: TableInfoMap, qid: u64 },
+    Data(Vec<RawRow>),
+    Empty,
 }
 
 impl ResponseType {
@@ -69,17 +72,5 @@ impl ResponseType {
         let s = buf_sock.read_line()?;
         let response = serde_json::from_str(&s)?;
         Ok(response)
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct QueriedData {
-    schema: TableInfoMap,
-    rows: Vec<Row>,
-}
-
-impl QueriedData {
-    pub fn new(schema: TableInfoMap, rows: Vec<Row>) -> Self {
-        Self { schema, rows }
     }
 }

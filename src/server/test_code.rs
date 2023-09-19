@@ -7,42 +7,49 @@ pub fn init_test_db() {
     schema.insert(
         "attributes".into(),
         vec![
-            ("index".into(), ColumnType::Int),
-            ("Strength".into(), ColumnType::Int),
-            ("Dexterity".into(), ColumnType::Int),
-            ("Constitution".into(), ColumnType::Int),
-            ("Intelligence".into(), ColumnType::Int),
-            ("Wisdom".into(), ColumnType::Int),
-            ("Charisma".into(), ColumnType::Int),
+            ("index".into(), ColumnType::Integer),
+            ("Strength".into(), ColumnType::Integer),
+            ("Dexterity".into(), ColumnType::Integer),
+            ("Constitution".into(), ColumnType::Integer),
+            ("Intelligence".into(), ColumnType::Integer),
+            ("Wisdom".into(), ColumnType::Integer),
+            ("Charisma".into(), ColumnType::Integer),
         ],
     );
     schema.insert(
         "currency".into(),
         vec![
-            ("index".into(), ColumnType::Int),
-            ("Platinum".into(), ColumnType::Int),
-            ("Gold".into(), ColumnType::Int),
-            ("Silver".into(), ColumnType::Int),
-            ("Copper".into(), ColumnType::Int),
+            ("index".into(), ColumnType::Integer),
+            ("Platinum".into(), ColumnType::Integer),
+            ("Gold".into(), ColumnType::Integer),
+            ("Silver".into(), ColumnType::Integer),
+            ("Copper".into(), ColumnType::Integer),
         ],
     );
 
     match DataBase::create(Path::new("./data/test.ogmadb"), schema) {
         Ok(db) => {
             println!("Success Creating!");
-            let data = vec![mint()];
+            let data = vec![
+                mint(0),
+                mint(204),
+                mint(408),
+                mint(612),
+                mint(816),
+                mint(1020),
+            ];
             db.store("currency", data).unwrap();
         }
         Err(_) => println!("broke creating"),
     }
 }
 
-fn mint() -> Block {
+fn mint(start_id: usize) -> Block {
     const ROW_WIDTH: usize = 5 * COLUMN_WIDTH;
     const ROWS_IN_BLOCK: usize = BLOCK_SIZE / ROW_WIDTH;
     let mut block = [0u8; BLOCK_SIZE];
     for index in 0..ROWS_IN_BLOCK {
-        let row_id = index + 1;
+        let row_id = start_id + index + 1;
         let mut row = [0u8; ROW_WIDTH];
         row[..8].clone_from_slice(&row_id.to_le_bytes());
         row[8..16].clone_from_slice(&(row_id % 100).to_le_bytes());

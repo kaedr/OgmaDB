@@ -10,6 +10,7 @@ use std::{collections::HashMap, io::Write};
 // Third party library imports
 use serde_json::from_str;
 
+use crate::common::{AsRows, RawRow};
 // First party library imports
 use crate::common::{error::Error, map_table_info, Block, DBSchema, TableInfoMap, BLOCK_SIZE};
 
@@ -56,6 +57,7 @@ pub struct DataBase {
     schema_file: File,
     schema: DBSchema,
     tables: HashMap<String, File>,
+    queries: HashMap<u64, Vec<RawRow>>,
 }
 
 impl DataBase {
@@ -76,6 +78,7 @@ impl DataBase {
                 schema_file,
                 schema,
                 tables,
+                queries: HashMap::new(),
             })
         } else {
             Err(Error::PathError(format!(
@@ -106,6 +109,7 @@ impl DataBase {
                 schema_file,
                 schema,
                 tables,
+                queries: HashMap::new(),
             })
         } else {
             Err(Error::PathError(format!(
@@ -199,4 +203,42 @@ impl DataBase {
             ))),
         }
     }
+
+    pub fn execute(&mut self, action: Action) -> Result<Reaction, Error> {
+        match action {
+            Action::GetAll(table_name) => {
+                let (qid, schema) = self.begin_query(table_name)?;
+                Ok(Reaction::QueryStart { schema, qid })
+            }
+            Action::GetMore(qid) => {
+                if let Some(data) = self.queries.remove(&qid) {
+                    Ok(Reaction::Data(data))
+                } else {
+                    Ok(Reaction::Empty)
+                }
+            }
+        }
+    }
+
+    pub fn begin_query(&mut self, query: String) -> Result<(u64, TableInfoMap), Error> {
+        let (table_schema, data) = self.load(&query)?;
+        let mut qid = rand::random();
+        // Make sure that qid isn't in use...
+        while self.queries.contains_key(&qid) {
+            qid = rand::random();
+        }
+        self.queries.insert(qid, data.as_rows(table_schema.len()));
+        Ok((qid, table_schema))
+    }
+}
+
+pub enum Action {
+    GetAll(String),
+    GetMore(u64),
+}
+
+pub enum Reaction {
+    QueryStart { schema: TableInfoMap, qid: u64 },
+    Data(Vec<RawRow>),
+    Empty,
 }
