@@ -6,8 +6,7 @@ use std::{
 use ogma_db::{
     common::{
         error::Error,
-        network::{BufSocket, RequestType, ResponseType},
-        AsRows,
+        network::{BufSocket, RequestType, ResponseType, Server},
     },
     query_engine::process_query,
     storage_engine::{Action, DataBase, Reaction},
@@ -31,9 +30,9 @@ pub fn start_server<A: ToSocketAddrs>(addr: A) -> Result<(), Error> {
 fn handle_client(db: &mut DataBase, stream: TcpStream) -> Result<(), Error> {
     let mut buf_sock = BufSocket::new(stream)?;
     // TODO, keep track of client queries to drop when client disconnects
-    let queries = Vec::<u64>::new();
+    // let queries = Vec::<u64>::new();
     loop {
-        match RequestType::receive(&mut buf_sock) {
+        match buf_sock.receive() {
             Ok(request) => match handle_request(db, &mut buf_sock, request) {
                 Ok(_) => (),
                 Err(err) => {
@@ -53,7 +52,7 @@ fn handle_client(db: &mut DataBase, stream: TcpStream) -> Result<(), Error> {
 
 fn handle_error(buf_sock: &mut BufSocket, err: Error) -> Result<(), Error> {
     let error_response = ResponseType::Error(err);
-    match error_response.send(buf_sock) {
+    match buf_sock.send(&error_response) {
         Ok(_) => Ok(println!("Response: {:?} -- was sent", error_response)),
         Err(err) => {
             println!("Encountered: {:?}", err);
@@ -70,15 +69,16 @@ fn handle_request(
 ) -> Result<(), Error> {
     println!("Request: {:?} -- received", request);
     let reaction = match request {
-        RequestType::Query(query) => db.execute(process_query(query))?,
-        RequestType::More(qid) => db.execute(Action::GetMore(qid))?,
+        RequestType::Query(query) => db.execute(process_query(query)),
+        RequestType::More(qid) => db.execute(Action::GetMore(qid)),
     };
 
     let response = match reaction {
+        Reaction::Error(err) => ResponseType::Error(err),
         Reaction::QueryStart { schema, qid } => ResponseType::QueryHandle { schema, qid },
         Reaction::Data(data) => ResponseType::Data(data),
         Reaction::Empty => ResponseType::Empty,
     };
 
-    response.send(buf_sock)
+    buf_sock.send(&response)
 }

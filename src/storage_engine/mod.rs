@@ -10,7 +10,7 @@ use std::{collections::HashMap, io::Write};
 // Third party library imports
 use serde_json::from_str;
 
-use crate::common::{AsRows, RawRow};
+use crate::common::{AsRawRows, DataType, RawRow};
 // First party library imports
 use crate::common::{error::Error, map_table_info, Block, DBSchema, TableInfoMap, BLOCK_SIZE};
 

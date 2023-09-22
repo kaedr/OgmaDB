@@ -2,7 +2,7 @@ use std::net::TcpStream;
 
 use ogma_db::common::{
     error::Error,
-    network::{BufSocket, RequestType, ResponseType},
+    network::{BufSocket, Client, RequestType, ResponseType},
 };
 
 fn main() {
@@ -10,23 +10,21 @@ fn main() {
         println!("Connected to the server!");
         let example_query =
             RequestType::Query(String::from("The actual contents don't matter yet!"));
-        example_query
-            .send(&mut buf_sock)
+        buf_sock
+            .send(&example_query)
             .expect("Blew up while sending...");
-        //stream.shutdown(std::net::Shutdown::Write).expect("Blew up while sending...");
-        println!("Request: {:?} -- was sent", example_query);
-        let example_response =
-            ResponseType::receive(&mut buf_sock).expect("Blew up while receiving...");
+        let example_response = buf_sock.receive().expect("Blew up while receiving...");
         println!("Response: {:?} -- was received", example_response);
 
         match example_response {
             ResponseType::Error(_) => todo!(),
-            ResponseType::QueryHandle { schema, qid } => {
-                RequestType::More(qid).send(&mut buf_sock).expect("Blew up while sending...");
-                let another_response =
-                    ResponseType::receive(&mut buf_sock).expect("Blew up while receiving...");
+            ResponseType::QueryHandle { qid, .. } => {
+                buf_sock
+                    .send(&RequestType::More(qid))
+                    .expect("Blew up while sending...");
+                let another_response = buf_sock.receive().expect("Blew up while receiving...");
                 println!("Response: {:?} -- was received", another_response);
-            },
+            }
             ResponseType::Data(_) => todo!(),
             ResponseType::Empty => todo!(),
         }
