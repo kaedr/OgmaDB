@@ -204,40 +204,70 @@ impl DataBase {
         }
     }
 
-    pub fn execute(&mut self, action: Action) -> Result<Reaction, Error> {
+    pub fn execute(&mut self, action: Action) -> Reaction {
         match action {
-            Action::GetAll(table_name) => {
-                let (qid, schema) = self.begin_query(table_name)?;
-                Ok(Reaction::QueryStart { schema, qid })
-            }
+            Action::GetAll(query) => match self.begin_query(query, vec![FilterType::All]) {
+                Ok((qid, schema)) => Reaction::QueryStart { schema, qid },
+                Err(err) => Reaction::Error(err),
+            },
             Action::GetMore(qid) => {
                 if let Some(data) = self.queries.remove(&qid) {
-                    Ok(Reaction::Data(data))
+                    Reaction::Data(data)
                 } else {
-                    Ok(Reaction::Empty)
+                    Reaction::Empty
                 }
             }
+            Action::GetFiltered(query, filters) => match self.begin_query(query, filters) {
+                Ok((qid, schema)) => Reaction::QueryStart { schema, qid },
+                Err(err) => Reaction::Error(err),
+            },
         }
     }
 
-    pub fn begin_query(&mut self, query: String) -> Result<(u64, TableInfoMap), Error> {
+    fn begin_query(
+        &mut self,
+        query: String,
+        filters: Vec<FilterType>,
+    ) -> Result<(u64, TableInfoMap), Error> {
         let (table_schema, data) = self.load(&query)?;
         let mut qid = rand::random();
         // Make sure that qid isn't in use...
         while self.queries.contains_key(&qid) {
             qid = rand::random();
         }
-        self.queries.insert(qid, data.as_rows(table_schema.len()));
+        self.queries.insert(
+            qid,
+            data.as_filtered_rows(table_schema.len(), &mut |raw_row| {
+                apply_filters(raw_row, &filters, &table_schema)
+            }),
+        );
         Ok((qid, table_schema))
     }
 }
 
+fn apply_filters(raw_row: &RawRow, filters: &Vec<FilterType>, table_schema: &TableInfoMap) -> bool {
+    true
+}
+
 pub enum Action {
     GetAll(String),
+    GetFiltered(String, Vec<FilterType>),
     GetMore(u64),
 }
 
+pub enum FilterType {
+    GreaterThanEqualTo(String, DataType),
+    GreaterThan(String, DataType),
+    LessThanEqualTo(String, DataType),
+    LessThan(String, DataType),
+    EqualTo(String, DataType),
+    Between(String, DataType, DataType),
+    In(String, Vec<DataType>),
+    All,
+}
+
 pub enum Reaction {
+    Error(Error),
     QueryStart { schema: TableInfoMap, qid: u64 },
     Data(Vec<RawRow>),
     Empty,
