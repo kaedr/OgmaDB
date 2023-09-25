@@ -293,11 +293,11 @@ fn apply_filter(raw_row: &RawRow, filter: &FilterType, table_schema: &TableInfoM
             has_ordering(
                 lower,
                 field_from_row(raw_row, column, table_schema),
-                Ordering::Greater,
+                Ordering::Less,
             ) && has_ordering(
                 upper,
                 field_from_row(raw_row, column, table_schema),
-                Ordering::Less,
+                Ordering::Greater,
             )
         }
         FilterType::In(column, values) => values.iter().any(|value| {
@@ -609,32 +609,32 @@ mod tests {
         );
         assert!(
             !apply_filter(&raw_row, &int_over, &table_schema),
-            "Int BT failed on greater."
+            "Int BT failed on below."
         );
         assert!(
             apply_filter(&raw_row, &int_eq, &table_schema),
-            "Int BT failed on equal."
+            "Int BT failed on within."
         );
         assert!(
             !apply_filter(&raw_row, &int_under, &table_schema),
-            "Int BT failed of lesser."
+            "Int BT failed of above."
         );
 
         let (text_over, text_eq, text_under) = (
             FilterType::Between(
                 "word".into(),
+                DataType::Text(['a'; 8]),
                 DataType::Text(['b'; 8]),
+            ),
+            FilterType::Between(
+                "word".into(),
                 DataType::Text(['a'; 8]),
+                DataType::Text(['c'; 8]),
             ),
             FilterType::Between(
                 "word".into(),
                 DataType::Text(['c'; 8]),
-                DataType::Text(['a'; 8]),
-            ),
-            FilterType::Between(
-                "word".into(),
                 DataType::Text(['d'; 8]),
-                DataType::Text(['c'; 8]),
             ),
         );
         assert!(
