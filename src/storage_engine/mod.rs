@@ -1,5 +1,6 @@
 // Rust Builtin Imports
 
+use std::cmp::Ordering;
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::Read;
@@ -10,7 +11,7 @@ use std::{collections::HashMap, io::Write};
 // Third party library imports
 use serde_json::from_str;
 
-use crate::common::{AsRawRows, DataType, RawRow};
+use crate::common::{convert_row_field, AsRawRows, DataType, RawRow};
 // First party library imports
 use crate::common::{error::Error, map_table_info, Block, DBSchema, TableInfoMap, BLOCK_SIZE};
 
@@ -246,7 +247,86 @@ impl DataBase {
 }
 
 fn apply_filters(raw_row: &RawRow, filters: &Vec<FilterType>, table_schema: &TableInfoMap) -> bool {
-    true
+    filters.iter().all(|filter| apply_filter(raw_row, filter, table_schema))
+}
+
+fn apply_filter(raw_row: &RawRow, filter: &FilterType, table_schema: &TableInfoMap) -> bool {
+    match filter {
+        FilterType::GreaterThanEqualTo(column, value) => {
+            has_ordering(
+                value,
+                field_from_row(raw_row, column, table_schema),
+                Ordering::Equal,
+            ) || has_ordering(
+                value,
+                field_from_row(raw_row, column, table_schema),
+                Ordering::Greater,
+            )
+        }
+        FilterType::GreaterThan(column, value) => has_ordering(
+            value,
+            field_from_row(raw_row, column, table_schema),
+            Ordering::Greater,
+        ),
+        FilterType::LessThanEqualTo(column, value) => {
+            has_ordering(
+                value,
+                field_from_row(raw_row, column, table_schema),
+                Ordering::Equal,
+            ) || has_ordering(
+                value,
+                field_from_row(raw_row, column, table_schema),
+                Ordering::Less,
+            )
+        }
+        FilterType::LessThan(column, value) => has_ordering(
+            value,
+            field_from_row(raw_row, column, table_schema),
+            Ordering::Less,
+        ),
+        FilterType::EqualTo(column, value) => has_ordering(
+            value,
+            field_from_row(raw_row, column, table_schema),
+            Ordering::Equal,
+        ),
+        FilterType::Between(column, lower, upper) => {
+            has_ordering(
+                lower,
+                field_from_row(raw_row, column, table_schema),
+                Ordering::Greater,
+            ) && has_ordering(
+                upper,
+                field_from_row(raw_row, column, table_schema),
+                Ordering::Less,
+            )
+        }
+        FilterType::In(column, values) => values.iter().any(|value| {
+            has_ordering(
+                value,
+                field_from_row(raw_row, column, table_schema),
+                Ordering::Equal,
+            )
+        }),
+        FilterType::All => true,
+    }
+}
+
+fn field_from_row(
+    raw_row: &RawRow,
+    column_name: &String,
+    table_schema: &TableInfoMap,
+) -> Option<DataType> {
+    let (to_type, offset) = table_schema.get(column_name)?;
+    convert_row_field(raw_row, to_type, *offset)
+}
+
+fn has_ordering(left: &DataType, right: Option<DataType>, order: Ordering) -> bool {
+    if let Some(right) = right {
+        println!("Comparing {:?} to {:?} -- {:?}", left, right, left.partial_cmp(&right));
+        left.partial_cmp(&right) == Some(order)
+    } else {
+        false
+    }
 }
 
 pub enum Action {
@@ -271,4 +351,387 @@ pub enum Reaction {
     QueryStart { schema: TableInfoMap, qid: u64 },
     Data(Vec<RawRow>),
     Empty,
+}
+
+#[cfg(test)]
+mod tests {
+    use byteorder::{ByteOrder, LE};
+
+    use crate::common::{ColumnType, TableInfo};
+
+    use super::*;
+
+    fn test_data() -> (RawRow, TableInfoMap) {
+        let word = LE::read_u64("bird\0\0\0\0".as_bytes());
+        let raw_row: RawRow = vec![8675309u64, 0u64, word];
+        let table_info: TableInfo = vec![
+            ("ID".into(), ColumnType::Integer),
+            ("truthy".into(), ColumnType::Boolean),
+            ("word".into(), ColumnType::Text),
+        ];
+        (raw_row, map_table_info(&table_info))
+    }
+
+    #[test]
+    fn test_filter_gtet() {
+        let (raw_row, table_schema) = test_data();
+        let (int_over, int_eq, int_under) = (
+            FilterType::GreaterThanEqualTo("ID".into(), DataType::Integer(8675310i64)),
+            FilterType::GreaterThanEqualTo("ID".into(), DataType::Integer(8675309i64)),
+            FilterType::GreaterThanEqualTo("ID".into(), DataType::Integer(8675308i64)),
+        );
+        assert!(
+            apply_filter(&raw_row, &int_over, &table_schema),
+            "Int GTET failed on greater."
+        );
+        assert!(
+            apply_filter(&raw_row, &int_eq, &table_schema),
+            "Int GTET failed on equal."
+        );
+        assert!(
+            !apply_filter(&raw_row, &int_under, &table_schema),
+            "Int GTET failed of lesser."
+        );
+
+        let (text_under, text_eq, text_over) = (
+            FilterType::GreaterThanEqualTo("word".into(), DataType::Text(['b'; 8])),
+            FilterType::GreaterThanEqualTo(
+                "word".into(),
+                DataType::Text(['b', 'i', 'r', 'd', '\0', '\0', '\0', '\0']),
+            ),
+            FilterType::GreaterThanEqualTo("word".into(), DataType::Text(['c'; 8])),
+        );
+        assert!(
+            apply_filter(&raw_row, &text_over, &table_schema),
+            "Text GTET failed on greater."
+        );
+        assert!(
+            apply_filter(&raw_row, &text_eq, &table_schema),
+            "Text GTET failed on equal."
+        );
+        assert!(
+            !apply_filter(&raw_row, &text_under, &table_schema),
+            "Text GTET failed of lesser."
+        );
+    }
+
+    #[test]
+    fn test_filter_gt() {
+        let (raw_row, table_schema) = test_data();
+        let (int_over, int_eq, int_under) = (
+            FilterType::GreaterThan("ID".into(), DataType::Integer(8675310i64)),
+            FilterType::GreaterThan("ID".into(), DataType::Integer(8675309i64)),
+            FilterType::GreaterThan("ID".into(), DataType::Integer(8675308i64)),
+        );
+        assert!(
+            apply_filter(&raw_row, &int_over, &table_schema),
+            "Int GT failed on greater."
+        );
+        assert!(
+            !apply_filter(&raw_row, &int_eq, &table_schema),
+            "Int GT failed on equal."
+        );
+        assert!(
+            !apply_filter(&raw_row, &int_under, &table_schema),
+            "Int GT failed of lesser."
+        );
+
+        let (text_under, text_eq, text_over) = (
+            FilterType::GreaterThan("word".into(), DataType::Text(['b'; 8])),
+            FilterType::GreaterThan(
+                "word".into(),
+                DataType::Text(['b', 'i', 'r', 'd', '\0', '\0', '\0', '\0']),
+            ),
+            FilterType::GreaterThan("word".into(), DataType::Text(['c'; 8])),
+        );
+        assert!(
+            apply_filter(&raw_row, &text_over, &table_schema),
+            "Text GT failed on greater."
+        );
+        assert!(
+            !apply_filter(&raw_row, &text_eq, &table_schema),
+            "Text GT failed on equal."
+        );
+        assert!(
+            !apply_filter(&raw_row, &text_under, &table_schema),
+            "Text GT failed of lesser."
+        );
+    }
+
+    #[test]
+    fn test_filter_ltet() {
+        let (raw_row, table_schema) = test_data();
+        let (int_over, int_eq, int_under) = (
+            FilterType::LessThanEqualTo("ID".into(), DataType::Integer(8675310i64)),
+            FilterType::LessThanEqualTo("ID".into(), DataType::Integer(8675309i64)),
+            FilterType::LessThanEqualTo("ID".into(), DataType::Integer(8675308i64)),
+        );
+        assert!(
+            !apply_filter(&raw_row, &int_over, &table_schema),
+            "Int LTET failed on greater."
+        );
+        assert!(
+            apply_filter(&raw_row, &int_eq, &table_schema),
+            "Int LTET failed on equal."
+        );
+        assert!(
+            apply_filter(&raw_row, &int_under, &table_schema),
+            "Int LTET failed of lesser."
+        );
+
+        let (text_under, text_eq, text_over) = (
+            FilterType::LessThanEqualTo("word".into(), DataType::Text(['b'; 8])),
+            FilterType::LessThanEqualTo(
+                "word".into(),
+                DataType::Text(['b', 'i', 'r', 'd', '\0', '\0', '\0', '\0']),
+            ),
+            FilterType::LessThanEqualTo("word".into(), DataType::Text(['c'; 8])),
+        );
+        assert!(
+            !apply_filter(&raw_row, &text_over, &table_schema),
+            "Text LTET failed on greater."
+        );
+        assert!(
+            apply_filter(&raw_row, &text_eq, &table_schema),
+            "Text LTET failed on equal."
+        );
+        assert!(
+            apply_filter(&raw_row, &text_under, &table_schema),
+            "Text LTET failed of lesser."
+        );
+    }
+
+    #[test]
+    fn test_filter_lt() {
+        let (raw_row, table_schema) = test_data();
+        let (int_over, int_eq, int_under) = (
+            FilterType::LessThan("ID".into(), DataType::Integer(8675310i64)),
+            FilterType::LessThan("ID".into(), DataType::Integer(8675309i64)),
+            FilterType::LessThan("ID".into(), DataType::Integer(8675308i64)),
+        );
+        assert!(
+            !apply_filter(&raw_row, &int_over, &table_schema),
+            "Int LT failed on greater."
+        );
+        assert!(
+            !apply_filter(&raw_row, &int_eq, &table_schema),
+            "Int LT failed on equal."
+        );
+        assert!(
+            apply_filter(&raw_row, &int_under, &table_schema),
+            "Int LT failed of lesser."
+        );
+
+        let (text_under, text_eq, text_over) = (
+            FilterType::LessThan("word".into(), DataType::Text(['b'; 8])),
+            FilterType::LessThan(
+                "word".into(),
+                DataType::Text(['b', 'i', 'r', 'd', '\0', '\0', '\0', '\0']),
+            ),
+            FilterType::LessThan("word".into(), DataType::Text(['c'; 8])),
+        );
+        assert!(
+            !apply_filter(&raw_row, &text_over, &table_schema),
+            "Text LT failed on greater."
+        );
+        assert!(
+            !apply_filter(&raw_row, &text_eq, &table_schema),
+            "Text LT failed on equal."
+        );
+        assert!(
+            apply_filter(&raw_row, &text_under, &table_schema),
+            "Text LT failed of lesser."
+        );
+    }
+
+    #[test]
+    fn test_filter_et() {
+        let (raw_row, table_schema) = test_data();
+        let (int_over, int_eq, int_under) = (
+            FilterType::EqualTo("ID".into(), DataType::Integer(8675310i64)),
+            FilterType::EqualTo("ID".into(), DataType::Integer(8675309i64)),
+            FilterType::EqualTo("ID".into(), DataType::Integer(8675308i64)),
+        );
+        assert!(
+            !apply_filter(&raw_row, &int_over, &table_schema),
+            "Int ET failed on greater."
+        );
+        assert!(
+            apply_filter(&raw_row, &int_eq, &table_schema),
+            "Int ET failed on equal."
+        );
+        assert!(
+            !apply_filter(&raw_row, &int_under, &table_schema),
+            "Int ET failed of lesser."
+        );
+
+        let (text_under, text_eq, text_over) = (
+            FilterType::EqualTo("word".into(), DataType::Text(['b'; 8])),
+            FilterType::EqualTo(
+                "word".into(),
+                DataType::Text(['b', 'i', 'r', 'd', '\0', '\0', '\0', '\0']),
+            ),
+            FilterType::EqualTo("word".into(), DataType::Text(['c'; 8])),
+        );
+        assert!(
+            !apply_filter(&raw_row, &text_over, &table_schema),
+            "Text ET failed on greater."
+        );
+        assert!(
+            apply_filter(&raw_row, &text_eq, &table_schema),
+            "Text ET failed on equal."
+        );
+        assert!(
+            !apply_filter(&raw_row, &text_under, &table_schema),
+            "Text ET failed of lesser."
+        );
+    }
+
+    #[test]
+    fn test_filter_bt() {
+        let (raw_row, table_schema) = test_data();
+        let (int_over, int_eq, int_under) = (
+            FilterType::Between(
+                "ID".into(),
+                DataType::Integer(8675310i64),
+                DataType::Integer(8675312i64),
+            ),
+            FilterType::Between(
+                "ID".into(),
+                DataType::Integer(8675308i64),
+                DataType::Integer(8675310i64),
+            ),
+            FilterType::Between(
+                "ID".into(),
+                DataType::Integer(8675306i64),
+                DataType::Integer(8675306i64),
+            ),
+        );
+        assert!(
+            !apply_filter(&raw_row, &int_over, &table_schema),
+            "Int BT failed on greater."
+        );
+        assert!(
+            apply_filter(&raw_row, &int_eq, &table_schema),
+            "Int BT failed on equal."
+        );
+        assert!(
+            !apply_filter(&raw_row, &int_under, &table_schema),
+            "Int BT failed of lesser."
+        );
+
+        let (text_over, text_eq, text_under) = (
+            FilterType::Between(
+                "word".into(),
+                DataType::Text(['b'; 8]),
+                DataType::Text(['a'; 8]),
+            ),
+            FilterType::Between(
+                "word".into(),
+                DataType::Text(['c'; 8]),
+                DataType::Text(['a'; 8]),
+            ),
+            FilterType::Between(
+                "word".into(),
+                DataType::Text(['d'; 8]),
+                DataType::Text(['c'; 8]),
+            ),
+        );
+        assert!(
+            !apply_filter(&raw_row, &text_over, &table_schema),
+            "Text BT failed on greater."
+        );
+        assert!(
+            apply_filter(&raw_row, &text_eq, &table_schema),
+            "Text BT failed on equal."
+        );
+        assert!(
+            !apply_filter(&raw_row, &text_under, &table_schema),
+            "Text BT failed of lesser."
+        );
+    }
+
+    #[test]
+    fn test_filter_in() {
+        let (raw_row, table_schema) = test_data();
+        let (int_within, int_without) = (
+            FilterType::In(
+                "ID".into(),
+                vec![
+                    DataType::Integer(8675308i64),
+                    DataType::Integer(8675309i64),
+                    DataType::Integer(8675310i64),
+                ],
+            ),
+            FilterType::In(
+                "ID".into(),
+                vec![
+                    DataType::Integer(8675308i64),
+                    DataType::Integer(8675301i64),
+                    DataType::Integer(8675310i64),
+                ],
+            ),
+        );
+        assert!(
+            apply_filter(&raw_row, &int_within, &table_schema),
+            "Int IN failed on in"
+        );
+        assert!(
+            !apply_filter(&raw_row, &int_without, &table_schema),
+            "Int IN failed on out"
+        );
+
+        let (bool_within, bool_without) = (
+            FilterType::In(
+                "truthy".into(),
+                vec![DataType::Boolean(true), DataType::Boolean(false)],
+            ),
+            FilterType::In(
+                "truthy".into(),
+                vec![DataType::Boolean(true), DataType::Boolean(true)],
+            ),
+        );
+        assert!(
+            apply_filter(&raw_row, &bool_within, &table_schema),
+            "Bool IN failed on in"
+        );
+        assert!(
+            !apply_filter(&raw_row, &bool_without, &table_schema),
+            "Bool IN failed on out"
+        );
+
+        let (text_within, text_without) = (
+            FilterType::In(
+                "word".into(),
+                vec![
+                    DataType::Text(['b'; 8]),
+                    DataType::Text(['b'; 8]),
+                    DataType::Text(['b', 'i', 'r', 'd', '\0', '\0', '\0', '\0']),
+                ],
+            ),
+            FilterType::In(
+                "word".into(),
+                vec![
+                    DataType::Text(['a'; 8]),
+                    DataType::Text(['b'; 8]),
+                    DataType::Text(['c'; 8]),
+                ],
+            ),
+        );
+        assert!(
+            apply_filter(&raw_row, &text_within, &table_schema),
+            "Text IN failed on in"
+        );
+        assert!(
+            !apply_filter(&raw_row, &text_without, &table_schema),
+            "Text IN failed on out"
+        );
+    }
+
+    #[test]
+    fn test_filter_all() {
+        let (raw_row, table_schema) = test_data();
+        let all = FilterType::All;
+        assert!(apply_filter(&raw_row, &all, &table_schema))
+    }
 }

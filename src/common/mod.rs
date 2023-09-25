@@ -22,6 +22,7 @@ pub enum ColumnType {
     Blob, // for any size binary data
 }
 
+#[derive(Debug)]
 pub enum DataType {
     Integer(i64),
     Boolean(bool),
@@ -66,6 +67,54 @@ pub fn convert_row(raw_row: RawRow, table_info: &TableInfo) -> Row {
         .zip(table_info.iter())
         .map(|(field, (_, to_type))| convert_field(field.to_owned(), to_type))
         .collect()
+}
+
+pub fn convert_row_field(raw_row: &RawRow, to_type: &ColumnType, offset: u64) -> Option<DataType> {
+    Some(convert_field(*raw_row.get(offset as usize)?, to_type))
+}
+
+impl PartialEq for DataType {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Integer(l0), Self::Integer(r0)) => l0 == r0,
+            (Self::Boolean(l0), Self::Boolean(r0)) => l0 == r0,
+            (Self::Text(l0), Self::Text(r0)) => l0 == r0,
+            (Self::ClobRef(l0), Self::ClobRef(r0)) => l0 == r0,
+            (Self::BlobRef(l0), Self::BlobRef(r0)) => l0 == r0,
+            _ => false,
+        }
+    }
+}
+
+impl PartialOrd for DataType {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Self::Integer(l0), Self::Integer(r0)) => l0.partial_cmp(r0),
+            (Self::Boolean(l0), Self::Boolean(r0)) => l0.partial_cmp(r0),
+            (Self::Text(l0), Self::Text(r0)) => l0.partial_cmp(r0),
+            (Self::ClobRef(l0), Self::ClobRef(r0)) => l0.partial_cmp(r0),
+            (Self::BlobRef(l0), Self::BlobRef(r0)) => l0.partial_cmp(r0),
+            _ => None,
+        }
+    }
+}
+
+impl From<i64> for DataType {
+    fn from(value: i64) -> Self {
+        Self::Integer(value)
+    }
+}
+
+impl From<bool> for DataType {
+    fn from(value: bool) -> Self {
+        Self::Boolean(value)
+    }
+}
+
+impl From<[char; 8]> for DataType {
+    fn from(value: [char; 8]) -> Self {
+        Self::Text(value)
+    }
 }
 
 pub trait AsRawRows {
