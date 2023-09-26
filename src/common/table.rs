@@ -1,4 +1,4 @@
-use crate::common::{TableInfo, Row};
+use crate::common::{TableInfo, Row, ColumnHeader};
 
 pub struct Table {
     name: String,
