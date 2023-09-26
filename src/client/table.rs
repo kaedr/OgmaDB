@@ -1,4 +1,4 @@
-use crate::common::{TableInfo, Row, ColumnHeader};
+use ogma_db::common::{TableInfo, Row, };
 
 pub struct Table {
     name: String,

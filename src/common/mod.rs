@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 pub mod error;
-pub mod table;
 pub mod network;
 
 pub const BLOCK_SIZE: usize = 8192;

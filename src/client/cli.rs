@@ -1,3 +1,4 @@
+mod table;
 use std::net::TcpStream;
 
 use ogma_db::common::{
