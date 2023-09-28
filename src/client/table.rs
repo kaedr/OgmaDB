@@ -1,13 +1,13 @@
-use ogma_db::common::{TableInfo, Row, };
+use ogma_db::common::{TableInfoMap, RawRow, };
 
 pub struct Table {
     name: String,
-    table_info: TableInfo,
-    relations: Vec<Row> 
+    table_info: TableInfoMap,
+    relations: Vec<RawRow> 
 }
 
 impl Table {
-    pub fn new(name: String, table_info: TableInfo) -> Self {
+    pub fn new(name: String, table_info: TableInfoMap) -> Self {
         Self {
             name,
             table_info,
@@ -15,12 +15,16 @@ impl Table {
         }
     }
 
-    pub fn from(name: String, table_info: TableInfo, relations: Vec<Row>) -> Self{
+    pub fn from(name: String, table_info: TableInfoMap, relations: Vec<RawRow>) -> Self{
         Self {
             name, 
             table_info, 
             relations
         }
+    }
+
+    pub fn insert_relation(mut self, relation: RawRow){
+        self.relations.push(relation)
     }
     
     pub fn describe(self) -> String{
@@ -37,7 +41,11 @@ impl Table {
         let output = String::new();
         if let Some(col) = cols.next(){
             format!("{}{}{:?}", output, "\t", col);     //TODO won't want :? in production
-        }  
+        }
         output
+    }
+
+    pub fn select(self, cols: Vec<String>) -> String{
+        unimplemented!()
     }
 }
