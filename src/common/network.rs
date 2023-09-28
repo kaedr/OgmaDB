@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::error::Error;
 
-use super::{Row, TableInfoMap};
+use super::{RawRow, TableInfoMap};
 
 pub struct BufSocket {
     reader: BufReader<TcpStream>,
@@ -35,51 +35,52 @@ impl BufSocket {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub enum RequestType {
-    Query(String),
+pub trait Client {
+    fn send(&mut self, request: &RequestType) -> Result<(), Error>;
+    fn receive(&mut self) -> Result<ResponseType, Error>;
 }
 
-impl RequestType {
-    pub fn send(&self, buf_sock: &mut BufSocket) -> Result<(), Error> {
-        let buf = serde_json::to_vec(self)?;
-        buf_sock.write_all(&buf)
+impl Client for BufSocket {
+    fn send(&mut self, request: &RequestType) -> Result<(), Error> {
+        let buf = serde_json::to_vec(request)?;
+        self.write_all(&buf)
     }
 
-    pub fn receive(buf_sock: &mut BufSocket) -> Result<Self, Error> {
-        let s = buf_sock.read_line()?;
+    fn receive(&mut self) -> Result<ResponseType, Error> {
+        let s = self.read_line()?;
+        let response = serde_json::from_str(&s)?;
+        Ok(response)
+    }
+}
+
+pub trait Server {
+    fn send(&mut self, response: &ResponseType) -> Result<(), Error>;
+    fn receive(&mut self) -> Result<RequestType, Error>;
+}
+
+impl Server for BufSocket {
+    fn send(&mut self, response: &ResponseType) -> Result<(), Error> {
+        let buf = serde_json::to_vec(response)?;
+        self.write_all(&buf)
+    }
+
+    fn receive(&mut self) -> Result<RequestType, Error> {
+        let s = self.read_line()?;
         let request = serde_json::from_str(&s)?;
         Ok(request)
     }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub enum ResponseType {
-    Error(Error),
-    Data(QueriedData),
-}
-
-impl ResponseType {
-    pub fn send(&self, buf_sock: &mut BufSocket) -> Result<(), Error> {
-        let buf = serde_json::to_vec(self)?;
-        buf_sock.write_all(&buf)
-    }
-
-    pub fn receive(buf_sock: &mut BufSocket) -> Result<Self, Error> {
-        let s = buf_sock.read_line()?;
-        let response = serde_json::from_str(&s)?;
-        Ok(response)
-    }
+pub enum RequestType {
+    Query(String),
+    More(u64),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct QueriedData {
-    schema: TableInfoMap,
-    rows: Vec<Row>,
-}
-
-impl QueriedData {
-    pub fn new(schema: TableInfoMap, rows: Vec<Row>) -> Self {
-        Self { schema, rows }
-    }
+pub enum ResponseType {
+    Error(Error),
+    QueryHandle { schema: TableInfoMap, qid: u64 },
+    Data(Vec<RawRow>),
+    Empty,
 }
